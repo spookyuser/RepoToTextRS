@@ -1,43 +1,29 @@
 use clap::{Arg, Command};
+use glob_match;
+use std::env;
 use std::fs::File;
-use std::io::{Result, Write};
+use std::io::{BufRead, BufReader, Result, Write};
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
-// Configuration
-const STANDARD_EXCLUSIONS: [&str; 24] = [
-    "node_modules/",
-    "metrics",
-    "sentry",
-    "luaScripts",
-    "lua",
-    "tsconfig",
-    "tracing",
-    "node_modules",
-    ".git/",
-    ".DS_Store",
-    "dist/",
-    "build/",
-    "*.log",
-    ".turbo",
-    "fixtures",
-    "scripts",
-    "sql",
-    "yaml",
-    "yaml",
-    "l10n",
-    "lock",
-    "email",
-    "nestjs",
-    "speed-trap",
-];
-
-const CUSTOM_INCLUDES: [&str; 3] = ["package.json", "../../README.md", "README.md"];
-
 fn main() -> Result<()> {
-    // Define command-line arguments with clap
-    let matches = Command::new("repototext")
+    // Read base includes and excludes from environment variables
+    let base_include_globs: Vec<String> = env::var("REPOTOTEXT_INCLUDE_GLOBS")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let base_exclude_globs: Vec<String> = env::var("REPOTOTEXT_EXCLUDE_GLOBS")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let matches = Command::new("repo_to_text")
         .version("0.1.0")
-        .author("Your Name")
         .about("Converts repository structure and files to text")
         .arg(
             Arg::new("repo_path")
@@ -47,8 +33,8 @@ fn main() -> Result<()> {
         )
         .arg(
             Arg::new("output_path")
-                .required(true)
                 .index(2)
+                .required(false)
                 .help("Path to the output text file"),
         )
         .arg(
@@ -58,47 +44,107 @@ fn main() -> Result<()> {
                 .help("Name of the package to include in the output file headers"),
         )
         .arg(
-            Arg::new("extensions")
-                .short('e')
-                .long("extensions")
-                .value_name("EXTENSIONS")
-                .help("Comma-separated list of file extensions to include (e.g., '.ts,.tsx')")
-                .value_parser(clap::builder::NonEmptyStringValueParser::new()),
+            Arg::new("include")
+                .short('I')
+                .long("include")
+                .value_name("INCLUDE_GLOB")
+                .help("Glob pattern for including files (e.g., '**/*.rs')")
+                .value_parser(clap::builder::NonEmptyStringValueParser::new())
+                .num_args(1..)
+                .default_value("**"),
         )
         .arg(
-            Arg::new("all_extensions")
-                .short('a')
-                .long("all")
-                .help("Include files with any extension"),
+            Arg::new("exclude")
+                .short('e')
+                .long("exclude")
+                .value_name("EXCLUDE_GLOB")
+                .help("Glob pattern for excluding files (e.g., 'node_modules/**')")
+                .value_parser(clap::builder::NonEmptyStringValueParser::new())
+                .num_args(1..),
+        )
+        .after_help(
+            "Glob Syntax Help:
+  - '*' matches any sequence of non-separator characters
+  - '**' matches any sequence of characters, including separator characters
+  - '?' matches any single non-separator character
+  - '[...]' matches any single character inside the brackets
+  - '{...}' matches any of the comma-separated patterns inside the braces",
         )
         .get_matches();
 
     let default_package_name = "".to_string();
     let repo_path = matches.get_one::<String>("repo_path").unwrap();
-    let output_path = matches.get_one::<String>("output_path").unwrap();
     let package_name = matches
         .get_one::<String>("package_name")
         .unwrap_or(&default_package_name);
 
-    let all_extensions = matches.contains_id("all_extensions");
-    let extensions: Vec<&str> = match matches.get_one::<String>("extensions") {
-        Some(ext_str) => ext_str.split(',').collect(),
-        None => vec![],
+    // Parse include and exclude glob patterns from command-line arguments
+    let cli_include_globs: Vec<String> = matches
+        .get_many::<String>("include")
+        .unwrap_or_default()
+        .cloned()
+        .collect();
+    let cli_exclude_globs: Vec<String> = matches
+        .get_many::<String>("exclude")
+        .unwrap_or_default()
+        .cloned()
+        .collect();
+
+    // Read .gitignore file if present
+    let gitignore_path = Path::new(repo_path).join(".gitignore");
+    let gitignore_globs: Vec<String> = if gitignore_path.exists() {
+        let file = File::open(gitignore_path)?;
+        let reader = BufReader::new(file);
+        reader
+            .lines()
+            .filter_map(|line| line.ok())
+            .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    // Combine glob patterns from environment variables, command-line arguments, and .gitignore
+    let merged_include_globs: Vec<String> = base_include_globs
+        .into_iter()
+        .chain(cli_include_globs.into_iter())
+        .collect();
+    let merged_exclude_globs: Vec<String> = base_exclude_globs
+        .into_iter()
+        .chain(cli_exclude_globs.into_iter())
+        .chain(gitignore_globs.into_iter())
+        .collect();
+
+    // Generate default output file path if not provided
+    let output_path = match matches.get_one::<String>("output_path") {
+        Some(path) => path.to_owned(),
+        None => {
+            let epoch = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Failed to get epoch time");
+            format!("/tmp/repo_to_text_{}", epoch.as_millis())
+        }
     };
 
     // Create output file
-    let mut output_file = File::create(output_path)?;
+    let mut output_file = File::create(&output_path)?;
 
     // Walk the directory structure and print to output file
     for entry in WalkDir::new(repo_path)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| is_included(e.path(), &extensions, all_extensions))
+        .filter(|e| is_included(e.path(), &merged_exclude_globs, &merged_include_globs))
     {
         let path = entry.path();
         if path.is_file() {
             // Read and write file content
-            let content = std::fs::read_to_string(path)?;
+            let content = match std::fs::read_to_string(path) {
+                Ok(content) => content,
+                Err(_) => {
+                    continue;
+                }
+            };
+
             writeln!(
                 output_file,
                 "===== BEGIN {prefix}/{path} =====",
@@ -129,24 +175,26 @@ fn main() -> Result<()> {
         }
     }
 
+    println!("Output saved to: {}", output_path);
+
     Ok(())
 }
 
 // Function to check if a file should be included
-fn is_included(path: &std::path::Path, extensions: &[&str], all_extensions: bool) -> bool {
+fn is_included(path: &std::path::Path, exclude_globs: &[String], include_globs: &[String]) -> bool {
     let path_str = path.to_str().unwrap_or("");
+
     // Check for exclusions
-    if STANDARD_EXCLUSIONS
+    if exclude_globs
         .iter()
-        .any(|exclusion| path_str.contains(exclusion))
+        .any(|glob| glob_match::glob_match(glob, path_str))
     {
         return false;
     }
 
-    // Check for inclusions or matching extensions
-    CUSTOM_INCLUDES
-        .iter()
-        .any(|inclusion| path_str.contains(inclusion))
-        || all_extensions
-        || extensions.iter().any(|ext| path_str.ends_with(ext))
+    // Check for inclusions
+    include_globs.is_empty()
+        || include_globs
+            .iter()
+            .any(|glob| glob_match::glob_match(glob, path_str))
 }
