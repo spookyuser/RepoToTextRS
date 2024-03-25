@@ -122,7 +122,7 @@ fn main() -> Result<()> {
             let epoch = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Failed to get epoch time");
-            format!("/tmp/repo_to_text_{}", epoch.as_millis())
+            format!("/tmp/repo_to_text_{}.txt", epoch.as_millis())
         }
     };
 
@@ -176,6 +176,15 @@ fn main() -> Result<()> {
     }
 
     println!("Output saved to: {}", output_path);
+    let output_file_parent = Path::new(&output_path).parent().unwrap();
+
+    match std::process::Command::new("open")
+        .arg(output_file_parent)
+        .output()
+    {
+        Ok(report) => {}
+        Err(err) => {}
+    }
 
     Ok(())
 }
