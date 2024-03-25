@@ -1,3 +1,4 @@
 [env]
 REPOTOTEXT_INCLUDE_GLOBS = "**/*.tsx"
 REPOTOTEXT_EXCLUDE_GLOBS = "node_modules/**,target/**"
+REPOTOTEXT_TREE_EXCLUDES = "node_modules|build|_locales|.plasmo|locales"

@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
 fn main() -> Result<()> {
-    // Read base includes and excludes from environment variables
+    let tree_excludes = env::var("REPOTOTEXT_TREE_EXCLUDES").unwrap_or_default();
     let base_include_globs: Vec<String> = env::var("REPOTOTEXT_INCLUDE_GLOBS")
         .unwrap_or_default()
         .split(',')
@@ -162,7 +162,12 @@ fn main() -> Result<()> {
     }
 
     // Run tree command from the command line
-    let output = std::process::Command::new("tree").arg(repo_path).output();
+    let output = std::process::Command::new("tree")
+        .arg(repo_path)
+        .arg("-I")
+        .arg(tree_excludes)
+        .output();
+
     match output {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
