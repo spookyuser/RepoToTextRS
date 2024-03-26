@@ -10,8 +10,8 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - aarch64-unknown-linux-gnu
-          - arm-unknown-linux-gnueabi
+          - x86_64-unknown-linux-gnu
+          - aarch64-apple-darwin
           - x86_64-pc-windows-gnu
     steps:
       - uses: actions/checkout@v2
@@ -23,5 +23,9 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           use-cross: true
-          command: test
+          command: cargo build -r
           args: --target ${{matrix.target}}
+      - uses: actions/upload-artifact@v2
+        with:
+          name: ${{matrix.target}}
+          path: target/${{matrix.target}}
