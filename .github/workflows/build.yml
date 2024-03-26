@@ -1,11 +1,11 @@
 name: Build
 
 on:
-  push:
-    branches: ["master"]
+  release:
+
   pull_request:
     branches: ["master"]
-  # Allow manually triggering the workflow from the web UI.
+
   workflow_dispatch:
 
 env:
