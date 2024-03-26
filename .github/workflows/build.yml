@@ -1,51 +1,43 @@
-# .github/workflows/release.yml
+name: Build
 
 on:
-  release:
-    types: [created]
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+  # Allow manually triggering the workflow from the web UI.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    name: Release - ${{ matrix.platform.release_for }}
-    strategy:
-      matrix:
-        platform:
-          - release_for: Windows-x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            bin: repototext.exe
-            name: repototext-Windows-x86_64.zip
-            command: both
+  build:
+    runs-on: ubuntu-latest
 
-          - release_for: Linux-x86_64
-            os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            bin: repototext
-            name: repototext-Linux-x86_64.tar.gz
-            command: both
-
-          - release_for: macOS-x86_64
-            os: macOS-latest
-            target: x86_64-apple-darwin
-            bin: repototext
-            name: repototext-Darwin-x86_64.tar.gz
-            command: both
-
-          - release_for: macOS-aarch64
-            os: macOS-latest
-            target: aarch64-apple-darwin
-            bin: repototext
-            name: repototext-Darwin-aarch64.tar.gz
-            command: both
-
-    runs-on: ${{ matrix.platform.os }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Build binary
-        uses: houseabsolute/actions-rust-cross@v0
+      - name: Install Linux and Windows Cross Compilers
+        run: sudo apt-get install --yes --no-install-recommends musl-tools gcc-mingw-w64-x86-64-win32
+
+      - name: Set up MacOS Cross Compiler
+        uses: Timmmm/setup-osxcross@v2
         with:
-          command: ${{ matrix.platform.command }}
-          target: ${{ matrix.platform.target }}
-          args: "--locked --release"
-          strip: true
+          osx-version: "12.3"
+
+      - name: Install Rustup targets
+        run: rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu x86_64-apple-darwin aarch64-apple-darwin
+
+      - name: Check out source code
+        uses: actions/checkout@v3
+
+      - name: Check
+        run: cargo check
+
+      - name: Build
+        run: cargo build --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu --target x86_64-apple-darwin --target aarch64-apple-darwin
+
+      - name: Upload Binaries
+        uses: actions/upload-artifact@v3
+        with:
+          name: binaries
+          path: target
