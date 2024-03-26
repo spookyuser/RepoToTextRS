@@ -34,7 +34,7 @@ jobs:
         run: cargo check
 
       - name: Build
-        run: cargo build --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu --target x86_64-apple-darwin --target aarch64-apple-darwin
+        run: cargo build  -r --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu --target x86_64-apple-darwin --target aarch64-apple-darwin
 
       - name: Upload Binaries
         uses: actions/upload-artifact@v3
