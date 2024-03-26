@@ -1,43 +1,27 @@
-name: Build
+on: [push]
 
-on:
-  release:
-
-  pull_request:
-    branches: ["master"]
-
-  workflow_dispatch:
-
-env:
-  CARGO_TERM_COLOR: always
+name: Cross CI
 
 jobs:
-  build:
+  cross:
+    name: Rust ${{matrix.target}}
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+          - arm-unknown-linux-gnueabi
+          - x86_64-pc-windows-gnu
     steps:
-      - name: Install Linux and Windows Cross Compilers
-        run: sudo apt-get install --yes --no-install-recommends musl-tools gcc-mingw-w64-x86-64-win32
-
-      - name: Set up MacOS Cross Compiler
-        uses: Timmmm/setup-osxcross@v2
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
         with:
-          osx-version: "12.3"
-
-      - name: Install Rustup targets
-        run: rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu x86_64-apple-darwin aarch64-apple-darwin
-
-      - name: Check out source code
-        uses: actions/checkout@v3
-
-      - name: Check
-        run: cargo check
-
-      - name: Build
-        run: cargo build  -r --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu --target x86_64-apple-darwin --target aarch64-apple-darwin
-
-      - name: Upload Binaries
-        uses: actions/upload-artifact@v3
+          toolchain: stable
+          target: ${{matrix.target}}
+          override: true
+      - uses: actions-rs/cargo@v1
         with:
-          name: binaries
-          path: target
+          use-cross: true
+          command: test
+          args: --target ${{matrix.target}}
