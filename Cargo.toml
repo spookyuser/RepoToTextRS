@@ -7,8 +7,11 @@
 
 [dependencies]
     clap="4.5.3"
+    config="0.14.0"
+    figment={version="0.10", features=["env", "toml"]}
     glob-match="0.2.1"
     rust_tree="0.1.4"
+    serde="1.0.197"
     walkdir="2.5.0"
 
 [profile.dev]

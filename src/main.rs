@@ -1,28 +1,35 @@
 use clap::{Arg, Command};
+use serde::Deserialize;
+
+use figment::{
+    providers::{Env, Format, Toml},
+    Figment,
+};
 use glob_match;
-use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Result, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
-fn main() -> Result<()> {
-    let tree_excludes = env::var("REPOTOTEXT_TREE_EXCLUDES").unwrap_or_default();
-    let base_include_globs: Vec<String> = env::var("REPOTOTEXT_INCLUDE_GLOBS")
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    let base_exclude_globs: Vec<String> = env::var("REPOTOTEXT_EXCLUDE_GLOBS")
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+#[derive(Deserialize)]
+struct Config {
+    tree_exclude_globs: String,
+    base_include_globs: Vec<String>,
+    base_exclude_globs: Vec<String>,
+    enable_gitignore: bool,
+}
 
-    let matches = Command::new("repo_to_text")
+fn main() -> Result<()> {
+    let config: Config = Figment::new()
+        .merge(Toml::file(
+            "/Users/caleb/Developer/RepoToTestRS/Settings.toml",
+        ))
+        .merge(Env::prefixed("REPOTOTEXT_"))
+        .extract()
+        .unwrap();
+
+    let matches = Command::new("repototext")
         .version("0.1.0")
         .about("Converts repository structure and files to text")
         .arg(
@@ -90,9 +97,9 @@ fn main() -> Result<()> {
         .cloned()
         .collect();
 
-    // Read .gitignore file if present
+    // Read .gitignore file if it exists and the setting is enabled
     let gitignore_path = Path::new(repo_path).join(".gitignore");
-    let gitignore_globs: Vec<String> = if gitignore_path.exists() {
+    let gitignore_globs: Vec<String> = if gitignore_path.exists() && config.enable_gitignore {
         let file = File::open(gitignore_path)?;
         let reader = BufReader::new(file);
         reader
@@ -105,11 +112,14 @@ fn main() -> Result<()> {
     };
 
     // Combine glob patterns from environment variables, command-line arguments, and .gitignore
-    let merged_include_globs: Vec<String> = base_include_globs
+    let merged_include_globs: Vec<String> = config
+        .base_include_globs
         .into_iter()
         .chain(cli_include_globs.into_iter())
         .collect();
-    let merged_exclude_globs: Vec<String> = base_exclude_globs
+
+    let merged_exclude_globs: Vec<String> = config
+        .base_exclude_globs
         .into_iter()
         .chain(cli_exclude_globs.into_iter())
         .chain(gitignore_globs.into_iter())
@@ -165,7 +175,7 @@ fn main() -> Result<()> {
     let output = std::process::Command::new("tree")
         .arg(repo_path)
         .arg("-I")
-        .arg(tree_excludes)
+        .arg(config.tree_exclude_globs)
         .output();
 
     match output {
@@ -181,14 +191,18 @@ fn main() -> Result<()> {
     }
 
     println!("Output saved to: {}", output_path);
+    // Debug print all globs
+    println!("Include globs: {:?}", merged_include_globs);
+    println!("Exclude globs: {:?}", merged_exclude_globs);
+
     let output_file_parent = Path::new(&output_path).parent().unwrap();
 
     match std::process::Command::new("open")
         .arg(output_file_parent)
         .output()
     {
-        Ok(report) => {}
-        Err(err) => {}
+        Ok(_report) => {}
+        Err(_err) => {}
     }
 
     Ok(())
