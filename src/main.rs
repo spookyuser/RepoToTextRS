@@ -1,34 +1,22 @@
 use clap::{Arg, Command};
+use figment::providers::Format;
 use serde::Deserialize;
 
-use figment::{
-    providers::{Env, Format, Toml},
-    Figment,
-};
-use glob_match;
+use figment::{providers::Toml, Figment};
 use std::fs::File;
-use std::io::{BufRead, BufReader, Result, Write};
+use std::io::{Result, Write};
 use std::path::Path;
+use std::process::Command as ProcessCommand;
 use std::time::{SystemTime, UNIX_EPOCH};
-use walkdir::WalkDir;
 
 #[derive(Deserialize)]
 struct Config {
     tree_exclude_globs: String,
-    base_include_globs: Vec<String>,
-    base_exclude_globs: Vec<String>,
-    enable_gitignore: bool,
+    ignore_files: Vec<String>,
+    file_extensions: Vec<String>,
 }
 
 fn main() -> Result<()> {
-    let config: Config = Figment::new()
-        .merge(Toml::file(
-            "/Users/caleb/Developer/RepoToTestRS/Settings.toml",
-        ))
-        .merge(Env::prefixed("REPOTOTEXT_"))
-        .extract()
-        .unwrap();
-
     let matches = Command::new("repototext")
         .version("0.1.0")
         .about("Converts repository structure and files to text")
@@ -45,85 +33,55 @@ fn main() -> Result<()> {
                 .help("Path to the output text file"),
         )
         .arg(
-            Arg::new("package_name")
-                .index(3)
-                .required(false)
-                .help("Name of the package to include in the output file headers"),
-        )
-        .arg(
-            Arg::new("include")
-                .short('I')
-                .long("include")
-                .value_name("INCLUDE_GLOB")
-                .help("Glob pattern for including files (e.g., '**/*.rs')")
-                .value_parser(clap::builder::NonEmptyStringValueParser::new())
-                .num_args(1..)
-                .default_value("**"),
-        )
-        .arg(
-            Arg::new("exclude")
+            Arg::new("extensions")
                 .short('e')
-                .long("exclude")
-                .value_name("EXCLUDE_GLOB")
-                .help("Glob pattern for excluding files (e.g., 'node_modules/**')")
-                .value_parser(clap::builder::NonEmptyStringValueParser::new())
-                .num_args(1..),
+                .long("extensions")
+                .value_name("EXT")
+                .help("File extensions to include (comma-separated)")
+                .use_value_delimiter(true)
+                .value_delimiter(','),
         )
-        .after_help(
-            "Glob Syntax Help:
-  - '*' matches any sequence of non-separator characters
-  - '**' matches any sequence of characters, including separator characters
-  - '?' matches any single non-separator character
-  - '[...]' matches any single character inside the brackets
-  - '{...}' matches any of the comma-separated patterns inside the braces",
+        .arg(
+            Arg::new("ignore")
+                .short('i')
+                .long("ignore")
+                .value_name("PATTERN")
+                .help("Ignore files/directories matching the given pattern")
+                .use_value_delimiter(true)
+                .value_delimiter(','),
         )
         .get_matches();
 
-    let default_package_name = "".to_string();
     let repo_path = matches.get_one::<String>("repo_path").unwrap();
-    let package_name = matches
-        .get_one::<String>("package_name")
-        .unwrap_or(&default_package_name);
 
-    // Parse include and exclude glob patterns from command-line arguments
-    let cli_include_globs: Vec<String> = matches
-        .get_many::<String>("include")
-        .unwrap_or_default()
-        .cloned()
-        .collect();
-    let cli_exclude_globs: Vec<String> = matches
-        .get_many::<String>("exclude")
-        .unwrap_or_default()
-        .cloned()
-        .collect();
+    // Load default configuration
+    let mut figment = Figment::new();
 
-    // Read .gitignore file if it exists and the setting is enabled
-    let gitignore_path = Path::new(repo_path).join(".gitignore");
-    let gitignore_globs: Vec<String> = if gitignore_path.exists() && config.enable_gitignore {
-        let file = File::open(gitignore_path)?;
-        let reader = BufReader::new(file);
-        reader
-            .lines()
-            .filter_map(|line| line.ok())
-            .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    // Load configuration from config.toml in the user's home directory
+    figment = figment.merge(Toml::file(
+        "/Users/caleb/Developer/RepoToTestRS/config.toml",
+    ));
 
-    // Combine glob patterns from environment variables, command-line arguments, and .gitignore
-    let merged_include_globs: Vec<String> = config
-        .base_include_globs
-        .into_iter()
-        .chain(cli_include_globs.into_iter())
-        .collect();
+    // Check if config.toml exists in the root of the repo directory
+    let config_path = Path::new(repo_path).join("config.toml");
+    if config_path.exists() {
+        // Merge repository-specific configuration
+        figment = figment.merge(Toml::file(config_path));
+    }
 
-    let merged_exclude_globs: Vec<String> = config
-        .base_exclude_globs
-        .into_iter()
-        .chain(cli_exclude_globs.into_iter())
-        .chain(gitignore_globs.into_iter())
-        .collect();
+    // Extract the merged configuration
+    let config: Config = figment.extract().unwrap();
+
+    // Override file extensions and ignore patterns from command line if provided
+    let file_extensions = matches
+        .get_many::<String>("extensions")
+        .map(|values| values.map(|ext| ext.to_string()).collect())
+        .unwrap_or(config.file_extensions);
+
+    let ignore_files = matches
+        .get_many::<String>("ignore")
+        .map(|values| values.map(|pattern| pattern.to_string()).collect())
+        .unwrap_or(config.ignore_files);
 
     // Generate default output file path if not provided
     let output_path = match matches.get_one::<String>("output_path") {
@@ -139,13 +97,28 @@ fn main() -> Result<()> {
     // Create output file
     let mut output_file = File::create(&output_path)?;
 
-    // Walk the directory structure and print to output file
-    for entry in WalkDir::new(repo_path)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| is_included(e.path(), &merged_exclude_globs, &merged_include_globs))
-    {
-        let path = entry.path();
+    // Use fd-find to generate file paths based on file extensions
+    let mut fd_command = ProcessCommand::new("fd");
+    fd_command.arg("--type").arg("file").arg("--unrestricted");
+
+    // Add file extensions
+    for extension in &file_extensions {
+        fd_command.arg("-e").arg(extension);
+    }
+
+    fd_command.arg(".").arg(repo_path);
+
+    // Exclude paths based on ignore patterns
+    for ignore_pattern in &ignore_files {
+        fd_command.arg("--exclude").arg(ignore_pattern);
+    }
+
+    let fd_output = fd_command.output()?;
+    let file_paths = String::from_utf8_lossy(&fd_output.stdout);
+
+    // Process each file path
+    for path in file_paths.lines() {
+        let path = Path::new(path);
         if path.is_file() {
             // Read and write file content
             let content = match std::fs::read_to_string(path) {
@@ -158,21 +131,21 @@ fn main() -> Result<()> {
             writeln!(
                 output_file,
                 "===== BEGIN {prefix}/{path} =====",
-                prefix = package_name,
+                prefix = "",
                 path = path.display()
             )?;
             writeln!(output_file, "{}", content)?;
             writeln!(
                 output_file,
                 "===== END {prefix}/{path} =====\n\n",
-                prefix = package_name,
+                prefix = "",
                 path = path.display()
             )?;
         }
     }
 
     // Run tree command from the command line
-    let output = std::process::Command::new("tree")
+    let output = ProcessCommand::new("tree")
         .arg(repo_path)
         .arg("-I")
         .arg(config.tree_exclude_globs)
@@ -189,40 +162,18 @@ fn main() -> Result<()> {
             eprintln!("Error running tree command: {}", e);
         }
     }
-
+    println!("FD Command: {:?}", fd_command);
     println!("Output saved to: {}", output_path);
-    // Debug print all globs
-    println!("Include globs: {:?}", merged_include_globs);
-    println!("Exclude globs: {:?}", merged_exclude_globs);
+    println!("Include extensions: {:?}", file_extensions);
+    println!("Ignore patterns: {:?}", ignore_files);
+    println!("FD Output: {}", file_paths);
 
     let output_file_parent = Path::new(&output_path).parent().unwrap();
 
-    match std::process::Command::new("open")
-        .arg(output_file_parent)
-        .output()
-    {
+    match ProcessCommand::new("open").arg(output_file_parent).output() {
         Ok(_report) => {}
         Err(_err) => {}
     }
 
     Ok(())
-}
-
-// Function to check if a file should be included
-fn is_included(path: &std::path::Path, exclude_globs: &[String], include_globs: &[String]) -> bool {
-    let path_str = path.to_str().unwrap_or("");
-
-    // Check for exclusions
-    if exclude_globs
-        .iter()
-        .any(|glob| glob_match::glob_match(glob, path_str))
-    {
-        return false;
-    }
-
-    // Check for inclusions
-    include_globs.is_empty()
-        || include_globs
-            .iter()
-            .any(|glob| glob_match::glob_match(glob, path_str))
 }
