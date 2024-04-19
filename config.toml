@@ -1,10 +1,18 @@
 # config.toml
 
 # Exclude globs for the tree command
-tree_exclude_globs="node_modules|.git|target|dist|build"
+tree_exclude_globs="node_modules|.git|target|dist|build|locales"
 
 # Ignore files and directories matching these patterns
-ignore_files=["*.bak", "*.log", "*.tmp", "temp/", "test_data/"]
+ignore_files=[
+    "*.bak",
+    "*.log",
+    "*.tmp",
+    "fixtures",
+    "temp/",
+    "test_data/",
+    "tests",
+]
 
 # File extensions to include
 file_extensions=["json", "md", "rs", "toml", "txt", "yaml", "yml"]

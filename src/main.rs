@@ -3,7 +3,7 @@ use figment::providers::Format;
 use serde::Deserialize;
 
 use figment::{providers::Toml, Figment};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{Result, Write};
 use std::path::Path;
 use std::process::Command as ProcessCommand;
@@ -84,22 +84,21 @@ fn main() -> Result<()> {
         .unwrap_or(config.ignore_files);
 
     // Generate default output file path if not provided
-    let output_path = match matches.get_one::<String>("output_path") {
-        Some(path) => path.to_owned(),
-        None => {
-            let epoch = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Failed to get epoch time");
-            format!("/tmp/repo_to_text_{}.txt", epoch.as_millis())
-        }
-    };
+    let epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Failed to get epoch time");
+    let output_folder = format!("/tmp/repo_to_text_{}", epoch.as_millis());
 
-    // Create output file
-    let mut output_file = File::create(&output_path)?;
+    // Create output folder
+    fs::create_dir_all(&output_folder)?;
+
+    // Create code.txt file
+    let mut code_file = File::create(Path::new(&output_folder).join("code.txt"))?;
+    let mut tree_file = File::create(Path::new(&output_folder).join("tree.txt"))?;
+    let mut debug_file = File::create(Path::new(&output_folder).join("debug.txt"))?;
 
     // Use fd-find to generate file paths based on file extensions
     let mut fd_command = ProcessCommand::new("fd");
-    fd_command.arg("--type").arg("file").arg("--unrestricted");
 
     // Add file extensions
     for extension in &file_extensions {
@@ -129,14 +128,14 @@ fn main() -> Result<()> {
             };
 
             writeln!(
-                output_file,
+                code_file,
                 "===== BEGIN {prefix}/{path} =====",
                 prefix = "",
                 path = path.display()
             )?;
-            writeln!(output_file, "{}", content)?;
+            writeln!(code_file, "{}", content)?;
             writeln!(
-                output_file,
+                code_file,
                 "===== END {prefix}/{path} =====\n\n",
                 prefix = "",
                 path = path.display()
@@ -154,23 +153,20 @@ fn main() -> Result<()> {
     match output {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            writeln!(output_file, "===== BEGIN TREE =====")?;
-            writeln!(output_file, "{}", stdout)?;
-            writeln!(output_file, "===== END TREE =====\n\n")?;
+            writeln!(tree_file, "===== BEGIN TREE =====")?;
+            writeln!(tree_file, "{}", stdout)?;
+            writeln!(tree_file, "===== END TREE =====\n\n")?;
         }
         Err(e) => {
             eprintln!("Error running tree command: {}", e);
         }
     }
-    println!("FD Command: {:?}", fd_command);
-    println!("Output saved to: {}", output_path);
-    println!("Include extensions: {:?}", file_extensions);
-    println!("Ignore patterns: {:?}", ignore_files);
-    println!("FD Output: {}", file_paths);
+    writeln!(debug_file, "FD Command: {:?}", fd_command)?;
+    writeln!(debug_file, "Include extensions: {:?}", file_extensions)?;
+    writeln!(debug_file, "Ignore patterns: {:?}", ignore_files)?;
+    writeln!(debug_file, "FD Output: {}", file_paths)?;
 
-    let output_file_parent = Path::new(&output_path).parent().unwrap();
-
-    match ProcessCommand::new("open").arg(output_file_parent).output() {
+    match ProcessCommand::new("open").arg(output_folder).output() {
         Ok(_report) => {}
         Err(_err) => {}
     }
