@@ -52,7 +52,32 @@ fn main() -> Result<()> {
         )
         .get_matches();
 
-    let repo_path = matches.get_one::<String>("repo_path").unwrap();
+    let repo_path = matches.get_one::<String>("repo_path").unwrap().to_string();
+
+    let is_git_url = repo_path.starts_with("http://") || repo_path.starts_with("https://");
+
+    let repo_path = if is_git_url {
+        // Clone the Git repository to a static temporary directory
+        let temp_dir = "/tmp/repo_to_text";
+        fs::create_dir_all(temp_dir)?;
+
+        let clone_path = Path::new(temp_dir).join("repo");
+
+        let output = ProcessCommand::new("git")
+            .arg("clone")
+            .arg(&repo_path)
+            .arg(&clone_path)
+            .output()?;
+
+        if !output.status.success() {
+            eprintln!("Error cloning Git repository: {:?}", output);
+            return Ok(());
+        }
+
+        clone_path.to_str().unwrap().to_string()
+    } else {
+        repo_path
+    };
 
     // Load default configuration
     let mut figment = Figment::new();
@@ -63,7 +88,7 @@ fn main() -> Result<()> {
     ));
 
     // Check if config.toml exists in the root of the repo directory
-    let config_path = Path::new(repo_path).join("config.toml");
+    let config_path = Path::new(&repo_path).join("config.toml");
     if config_path.exists() {
         // Merge repository-specific configuration
         figment = figment.merge(Toml::file(config_path));
@@ -105,7 +130,7 @@ fn main() -> Result<()> {
         fd_command.arg("-e").arg(extension);
     }
 
-    fd_command.arg(".").arg(repo_path);
+    fd_command.arg(".").arg(repo_path.clone());
 
     // Exclude paths based on ignore patterns
     for ignore_pattern in &ignore_files {
