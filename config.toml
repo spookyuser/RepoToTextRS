@@ -7,8 +7,10 @@ tree_exclude_globs="node_modules|.git|target|dist|build|locales"
 ignore_files=[
     "*.bak",
     "*.log",
+    "*.spec",
     "*.tmp",
     "fixtures",
+    "stories",
     "temp/",
     "test_data/",
     "tests",

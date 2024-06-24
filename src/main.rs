@@ -17,6 +17,21 @@ struct Config {
 }
 
 fn main() -> Result<()> {
+    if !is_command_available("tree") {
+        eprintln!("Error: 'tree' command not found. Please install 'tree' and try again.");
+        return Ok(());
+    }
+
+    if !is_command_available("git") {
+        eprintln!("Error: 'git' command not found. Please install 'git' and try again.");
+        return Ok(());
+    }
+
+    if !is_command_available("fd") {
+        eprintln!("Error: 'fd' command not found. Please install 'fd' and try again.");
+        return Ok(());
+    }
+
     let matches = Command::new("repototext")
         .version("0.1.0")
         .about("Converts repository structure and files to text")
@@ -197,4 +212,11 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn is_command_available(command: &str) -> bool {
+    match ProcessCommand::new("which").arg(command).output() {
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
 }
